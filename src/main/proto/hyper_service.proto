@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+package salesforce.hyperdb.grpc.v1;
+
+
+option java_multiple_files = true;
+option java_package = "com.salesforce.hyperdb.grpc";
+option java_outer_classname = "HyperDatabaseServiceProto";
+
+service HyperService {
+  rpc ExecuteQuery (QueryParam) returns (stream ExecuteQueryResponse);
+  rpc GetQueryResult (QueryResultParam) returns (stream QueryResult);
+  rpc GetQueryInfo (QueryInfoParam) returns (stream QueryInfo);
+  rpc CancelQuery (CancelQueryParam) returns (google.protobuf.Empty);
+}
+
+message CancelQueryParam {
+  string query_id = 1;
+}
+
+message QueryResultParam {
+  string query_id = 1;
+  OutputFormat output_format = 2;
+  oneof requested_data {
+    uint64 chunk_id = 3;
+    RowRange row_range = 5;
+  }
+  bool omit_schema = 4;
+}
+
+message RowRange {
+  uint64 offset = 1;
+  uint64 row_count = 2;
+}
+
+message QueryResult {
+  oneof result {
+    QueryResultPartBinary binary_part = 1;
+    QueryResultPartString string_part = 2;
+  }
+}
+
+message QueryInfoParam {
+  string query_id = 1;
+  bool streaming = 2;
+}
+
+message QueryInfo {
+  oneof content {
+    QueryStatus query_status = 1;
+  }
+  bool optional = 2;
+}
+
+message QueryStatus {
+  enum CompletionStatus{
+    RUNNING = 0;
+    RESULTS_PRODUCED = 1;
+    FINISHED = 2;
+  }
+  string query_id = 1;
+  CompletionStatus completion_status = 2;
+  uint64 chunk_count = 3;
+  uint64 row_count = 4;
+  double progress = 5;
+  google.protobuf.Timestamp expiration_time = 6;
+}
+
+enum OutputFormat {
+  TEXT_DEBUG = 0;
+  reserved 1;
+  ARROW_LEGACY_V1 = 2;
+  JSON_LEGACY_V1 = 3;
+  ARROW_LEGACY_V2 = 4;
+  ARROW_V3 = 5;
+  JSON_V2 = 6;
+}
+
+message QueryParam {
+  enum TransferMode {
+    ADAPTIVE = 0;
+    ASYNC = 1;
+    SYNC = 2;
+  }
+
+  enum ParameterStyle {
+    QUESTION_MARK = 0;
+    DOLLAR_NUMBERED = 1;
+    NAMED = 2;
+  }
+
+  string query = 1;
+  repeated AttachedDatabase database = 2;
+  OutputFormat output_format = 3;
+  map<string, string> settings = 4;
+  TransferMode transfer_mode = 5;
+  ParameterStyle param_style = 6;
+  oneof parameters {
+    QueryParameterArrow arrow_parameters = 7;
+    QueryParameterJson json_parameters = 8;
+  }
+  uint64 max_rows = 9;
+}
+
+message AttachedDatabase {
+  string path = 1;
+  string alias = 2;
+}
+
+message ExecuteQueryResponse {
+  oneof result {
+    QueryResultHeader header = 1;
+    QueryResultPartBinary binary_part = 4;
+    QueryResultPartString string_part = 5;
+    QueryInfo query_info = 6;
+    QueryResult query_result = 7;
+  }
+  bool optional = 9;
+}
+
+message QueryResultHeader {
+  oneof header {
+    QueryResultSchema schema = 1;
+    QueryCommandOk command = 2;
+  }
+}
+
+message QueryCommandOk {
+  oneof command_return {
+    google.protobuf.Empty empty = 2;
+    uint64 affected_rows = 1;
+  }
+}
+
+message QueryResultSchema {
+  repeated ColumnDescription column = 1;
+}
+
+message ColumnDescription {
+  string name = 1;
+  SqlType type = 2;
+}
+
+message SqlType {
+  enum TypeTag {
+    HYPER_UNSUPPORTED = 0;
+    HYPER_BOOL = 1;
+    HYPER_BIG_INT = 2;
+    HYPER_SMALL_INT = 3;
+    HYPER_INT = 4;
+    HYPER_NUMERIC = 5;
+    HYPER_DOUBLE = 6;
+    HYPER_OID = 7;
+    HYPER_BYTE_A = 8;
+    HYPER_TEXT = 9;
+    HYPER_VARCHAR = 10;
+    HYPER_CHAR = 11;
+    HYPER_JSON = 12;
+    HYPER_DATE = 13;
+    HYPER_INTERVAL = 14;
+    HYPER_TIME = 15;
+    HYPER_TIMESTAMP = 16;
+    HYPER_TIMESTAMP_TZ = 17;
+    HYPER_GEOGRAPHY = 18;
+    HYPER_FLOAT = 19;
+    HYPER_ARRAY_OF_FLOAT = 20;
+  }
+
+  message NumericModifier {
+    uint32 precision = 1;
+    uint32 scale = 2;
+  }
+
+  TypeTag tag = 1;
+  oneof modifier {
+    google.protobuf.Empty empty = 2;
+    uint32 max_length = 3;
+    NumericModifier numeric_modifier = 4;
+  }
+}
+
+message QueryResultPartBinary {
+  bytes data = 127;
+}
+
+message QueryResultPartString {
+  string data = 127;
+}
+
+message QueryParameterArrow {
+  bytes data = 127;
+}
+
+message QueryParameterJson {
+  string data = 127;
+}

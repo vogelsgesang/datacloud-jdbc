@@ -1,0 +1,8 @@
+listen-connection: tcp.grpc://0.0.0.0:8181
+skip-license: true
+language: en_US
+no-password: true
+use_v3_new_endpoints: true
+use_result_spooling: true
+grpc_persist_results: true
+log_pipelines: true

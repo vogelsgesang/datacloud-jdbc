@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package salesforce.hyperdb.grpc.v1;
+
+option java_multiple_files = true;
+option java_package = "com.salesforce.hyperdb.grpc";
+
+message TextPosition {
+  uint64 error_begin_character_offset = 2;
+  uint64 error_end_character_offset = 3;
+}
+
+message ErrorInfo {
+  string primary_message = 1;
+  string sqlstate = 2;
+  string customer_hint = 3;
+  string customer_detail = 4;
+  string system_detail = 5;
+  TextPosition position = 6;
+}
