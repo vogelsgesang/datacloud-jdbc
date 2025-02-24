@@ -451,8 +451,9 @@
                     <sourcepath>${project.build.directory}/delombok;${project.build.directory}/generated-sources/protobuf</sourcepath>
                     <source>${java.version}</source>
                     <quiet>true</quiet>
-                    <excludePackageNames>com.salesforce.hyperdb.grpc</excludePackageNames>
+                    <excludePackageNames>salesforce.cdp.hyperdb.v1.*</excludePackageNames>
                     <outputDirectory>${project.build.directory}/apidocs</outputDirectory>
+                    <failOnWarnings>false</failOnWarnings>
                 </configuration>
                 <executions>
                     <execution>
