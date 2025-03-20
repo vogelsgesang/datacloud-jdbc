@@ -17,20 +17,33 @@ package com.salesforce.datacloud.jdbc.core.partial;
 
 import com.salesforce.datacloud.jdbc.core.HyperGrpcClientExecutor;
 import com.salesforce.datacloud.jdbc.util.Unstable;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.concurrent.atomic.AtomicLong;
 import lombok.AccessLevel;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import salesforce.cdp.hyperdb.v1.QueryResult;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+@Slf4j
 @Unstable
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public class ChunkBased implements Iterator<QueryResult> {
     public static ChunkBased of(
             @NonNull HyperGrpcClientExecutor client, @NonNull String queryId, long chunkId, long limit) {
-        return new ChunkBased(client, queryId, new AtomicLong(chunkId), chunkId + limit);
+        return ChunkBased.of(client, queryId, chunkId, limit, false);
+    }
+
+    public static ChunkBased of(
+            @NonNull HyperGrpcClientExecutor client,
+            @NonNull String queryId,
+            long chunkId,
+            long limit,
+            boolean omitSchema) {
+        return new ChunkBased(client, queryId, new AtomicLong(chunkId), chunkId + limit, new AtomicBoolean(omitSchema));
     }
 
     @NonNull private final HyperGrpcClientExecutor client;
@@ -43,10 +56,13 @@ public class ChunkBased implements Iterator<QueryResult> {
 
     private Iterator<QueryResult> iterator;
 
+    private final AtomicBoolean omitSchema;
+
     @Override
     public boolean hasNext() {
         if (iterator == null) {
-            iterator = client.getQueryResult(queryId, chunkId.getAndIncrement(), false);
+            log.info("Fetching chunk based query result stream. queryId={}, chunkId={}, limit={}", queryId, chunkId, limitId);
+            iterator = client.getQueryResult(queryId, chunkId.getAndIncrement(), omitSchema.getAndSet(true));
         }
 
         if (iterator.hasNext()) {
@@ -54,7 +70,8 @@ public class ChunkBased implements Iterator<QueryResult> {
         }
 
         if (chunkId.get() < limitId) {
-            iterator = client.getQueryResult(queryId, chunkId.getAndIncrement(), true);
+            log.info("Fetching new chunk based query result stream. queryId={}, chunkId={}, limit={}", queryId, chunkId, limitId);
+            iterator = client.getQueryResult(queryId, chunkId.getAndIncrement(), omitSchema.get());
         }
 
         return iterator.hasNext();

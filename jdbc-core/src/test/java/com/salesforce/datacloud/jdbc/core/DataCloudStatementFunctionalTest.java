@@ -15,30 +15,37 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
-import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
-
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.hyper.HyperServerConfig;
 import com.salesforce.datacloud.jdbc.hyper.HyperTestBase;
-import java.sql.ResultSet;
-import java.util.stream.Collectors;
+import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
 import lombok.SneakyThrows;
 import lombok.val;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-public class DataCloudStatementFunctionalTest extends HyperTestBase {
+import java.sql.ResultSet;
+import java.util.stream.Collectors;
+
+import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.assertWithConnection;
+import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.assertWithStatement;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
+
+@ExtendWith(HyperTestBase.class)
+public class DataCloudStatementFunctionalTest {
     private static final HyperServerConfig configWithSleep =
-            HyperServerConfig.builder().experimentalPgSleep(true).build();
+            HyperServerConfig.builder().build();
 
     @Test
     @SneakyThrows
     public void canCancelStatementQuery() {
         try (val server = configWithSleep.start();
-                val statement = server.getConnection().createStatement().unwrap(DataCloudStatement.class)) {
+             val statement = server.getConnection().createStatement();
+             val client = server.getRawClient()) {
             statement.execute("select pg_sleep(5000000);");
-            val client = server.getRawClient();
-            val queryId = statement.getQueryId();
+
+            val queryId = statement.unwrap(DataCloudStatement.class).getQueryId();
             val a = client.getQueryStatus(queryId).findFirst().get();
             assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
 
@@ -53,12 +60,15 @@ public class DataCloudStatementFunctionalTest extends HyperTestBase {
     @SneakyThrows
     public void canCancelPreparedStatementQuery() {
         try (val server = configWithSleep.start();
-                val statement = server.getConnection()
+             val connection = server.getConnection();
+                val statement = connection
                         .prepareStatement("select pg_sleep(?)")
-                        .unwrap(DataCloudPreparedStatement.class)) {
+                        .unwrap(DataCloudPreparedStatement.class);
+             val client = server.getRawClient()) {
+
             statement.setInt(1, 5000000);
             statement.execute();
-            val client = server.getRawClient();
+
             val queryId = statement.getQueryId();
             val a = client.getQueryStatus(queryId).findFirst().get();
             assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
@@ -74,18 +84,17 @@ public class DataCloudStatementFunctionalTest extends HyperTestBase {
     @SneakyThrows
     public void canCancelAnotherQueryById() {
         try (val server = configWithSleep.start();
-                val statement = server.getConnection().createStatement().unwrap(DataCloudStatement.class);
-                val cancel = server.getConnection().unwrap(DataCloudConnection.class)) {
+             val connection = server.getConnection().unwrap(DataCloudConnection.class);
+             val statement = connection.createStatement().unwrap(DataCloudStatement.class);
+             val client = server.getRawClient()) {
 
             statement.execute("select pg_sleep(5000000);");
             val queryId = statement.getQueryId();
 
-            val client = server.getRawClient();
-
             val a = client.getQueryStatus(queryId).findFirst().get();
             assertThat(a.getCompletionStatus()).isEqualTo(DataCloudQueryStatus.CompletionStatus.RUNNING);
 
-            cancel.cancel(queryId);
+            connection.cancel(queryId);
 
             assertThatThrownBy(() -> client.getQueryStatus(queryId).collect(Collectors.toList()))
                     .hasMessage("FAILED_PRECONDITION: canceled");
@@ -110,6 +119,8 @@ public class DataCloudStatementFunctionalTest extends HyperTestBase {
 
             assertThat(rs.getType()).isEqualTo(ResultSet.TYPE_FORWARD_ONLY);
             assertThat(rs.getConcurrency()).isEqualTo(ResultSet.CONCUR_READ_ONLY);
+
+            assertThat(rs.getRow()).isEqualTo(0);
         });
     }
 

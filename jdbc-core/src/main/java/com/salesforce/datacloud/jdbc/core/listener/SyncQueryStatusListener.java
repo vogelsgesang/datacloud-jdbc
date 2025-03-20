@@ -22,11 +22,6 @@ import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.exception.QueryExceptionHandler;
 import com.salesforce.datacloud.jdbc.util.StreamUtilities;
 import io.grpc.StatusRuntimeException;
-import java.sql.SQLException;
-import java.util.Iterator;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Stream;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -38,8 +33,15 @@ import salesforce.cdp.hyperdb.v1.QueryInfo;
 import salesforce.cdp.hyperdb.v1.QueryResult;
 import salesforce.cdp.hyperdb.v1.QueryStatus;
 
+import java.sql.SQLException;
+import java.util.Iterator;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
+
 @Slf4j
 @Builder(access = AccessLevel.PRIVATE)
+@Deprecated
 public class SyncQueryStatusListener implements QueryStatusListener {
     @Getter
     private final String queryId;
@@ -55,10 +57,13 @@ public class SyncQueryStatusListener implements QueryStatusListener {
         val result = client.executeQuery(query);
 
         try {
-            val id = getQueryId(result.next(), query);
+            val queryId = getQueryId(result.next(), query);
+
+            log.info("Executing sync query. queryId={}", queryId);
+
             return SyncQueryStatusListener.builder()
                     .query(query)
-                    .queryId(id)
+                    .queryId(queryId)
                     .initial(result)
                     .build();
         } catch (StatusRuntimeException ex) {

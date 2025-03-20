@@ -15,141 +15,143 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Named.named;
-import static org.junit.jupiter.params.provider.Arguments.arguments;
-
 import com.salesforce.datacloud.jdbc.hyper.HyperTestBase;
-import com.salesforce.datacloud.jdbc.util.ThrowingBiFunction;
-import io.grpc.StatusRuntimeException;
-import java.sql.SQLException;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
+import com.salesforce.datacloud.jdbc.util.Constants;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import lombok.val;
-import org.assertj.core.api.AssertionsForClassTypes;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-public class StreamingResultSetTest extends HyperTestBase {
-    private static final int small = 10;
-    private static final int large = 10 * 1024 * 1024;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
-    private static Stream<Arguments> queryModes(int size) {
-        return Stream.of(
-                inline("executeSyncQuery", DataCloudStatement::executeSyncQuery, size),
-                inline("executeAdaptiveQuery", DataCloudStatement::executeAdaptiveQuery, size),
-                deferred("executeAsyncQuery", DataCloudStatement::executeAsyncQuery, true, size),
-                deferred("execute", DataCloudStatement::execute, true, size),
-                deferred("executeQuery", DataCloudStatement::executeQuery, false, size));
+import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.assertEachRowIsTheSame;
+import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.getHyperQueryConnection;
+import static org.assertj.core.api.Assertions.assertThat;
+
+@Slf4j
+@ExtendWith(HyperTestBase.class)
+public class StreamingResultSetTest {
+    public static String query(String arg) {
+        return String.format("select cast(a as numeric(38,18)) a, cast(a as numeric(38,18)) b, cast(a as numeric(38,18)) c from generate_series(1, %s) as s(a) order by a asc", arg);
     }
 
-    public static Stream<Arguments> queryModesWithMax() {
-        return Stream.of(small, large).flatMap(StreamingResultSetTest::queryModes);
+    private static final Properties none = new Properties();
+    private static final int large = 10 * 1024 * 1024;
+    private static final String regularSql = query(Integer.toString(large));
+    private static final String preparedSql = query("?");
+
+    @SneakyThrows
+    @Test
+    public void testAdaptivePreparedStatement() {
+        withPrepared(none, preparedSql, (conn, stmt) -> {
+            val rs = stmt.executeQuery().unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
+        });
     }
 
     @SneakyThrows
     @Test
-    public void exercisePreparedStatement() {
-        val sql =
-                "select cast(a as numeric(38,18)) a, cast(a as numeric(38,18)) b, cast(a as numeric(38,18)) c from generate_series(1, ?) as s(a) order by a asc";
-        val expected = new AtomicInteger(0);
-
-        assertWithConnection(conn -> {
-            try (val statement = conn.prepareStatement(sql)) {
-                statement.setInt(1, large);
-
-                val rs = statement.executeQuery();
-                assertThat(rs).isInstanceOf(StreamingResultSet.class);
-                assertThat(((StreamingResultSet) rs).isReady()).isTrue();
-
-                while (rs.next()) {
-                    assertEachRowIsTheSame(rs, expected);
-                }
-            }
+    public void testAdaptiveStatement() {
+        withStatement(none, (conn, stmt) -> {
+            val rs = stmt.executeQuery(regularSql).unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
         });
-
-        assertThat(expected.get()).isEqualTo(large);
     }
 
     @SneakyThrows
-    @ParameterizedTest
-    @MethodSource("queryModesWithMax")
-    public void exerciseQueryMode(
-            ThrowingBiFunction<DataCloudStatement, String, DataCloudResultSet> queryMode, int max) {
-        val sql = query(max);
-        val actual = new AtomicInteger(0);
-
-        assertWithStatement(statement -> {
-            val rs = queryMode.apply(statement, sql);
-            assertThat(rs).isInstanceOf(StreamingResultSet.class);
-            assertThat(rs.isReady()).isTrue();
-
-            while (rs.next()) {
-                assertEachRowIsTheSame(rs, actual);
-            }
+    @Test
+    public void testAsyncPreparedStatement() {
+        withPrepared(none, preparedSql, (conn, stmt) -> {
+            stmt.execute();
+            conn.waitForResultsProduced(stmt.getQueryId(), Duration.ofSeconds(30));
+            val rs = stmt.getResultSet().unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
         });
-
-        assertThat(actual.get()).isEqualTo(max);
-    }
-
-    private static Stream<Arguments> queryModesWithNoSize() {
-        return queryModes(-1);
     }
 
     @SneakyThrows
-    @ParameterizedTest
-    @MethodSource("queryModesWithNoSize")
-    public void allModesThrowOnNonsense(ThrowingBiFunction<DataCloudStatement, String, DataCloudResultSet> queryMode) {
-        val ex = Assertions.assertThrows(SQLException.class, () -> {
-            try (val conn = getHyperQueryConnection();
-                    val statement = (DataCloudStatement) conn.createStatement()) {
-                val result = queryMode.apply(statement, "select * from nonsense");
-                result.next();
-            }
+    @Test
+    public void testAsyncStatement() {
+        withStatement(none, (conn, stmt) -> {
+            stmt.execute(regularSql);
+            conn.waitForResultsProduced(stmt.getQueryId(), Duration.ofSeconds(30));
+            val rs = stmt.getResultSet().unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
         });
-
-        AssertionsForClassTypes.assertThat(ex).hasRootCauseInstanceOf(StatusRuntimeException.class);
-    }
-
-    public static String query(int max) {
-        return String.format(
-                "select cast(a as numeric(38,18)) a, cast(a as numeric(38,18)) b, cast(a as numeric(38,18)) c from generate_series(1, %d) as s(a) order by a asc",
-                max);
-    }
-
-    private static Arguments inline(
-            String name, ThrowingBiFunction<DataCloudStatement, String, DataCloudResultSet> impl, int size) {
-        return arguments(named(String.format("%s -> DataCloudResultSet", name), impl), size);
-    }
-
-    private static Arguments deferred(
-            String name, ThrowingBiFunction<DataCloudStatement, String, Object> impl, Boolean wait, int size) {
-        ThrowingBiFunction<DataCloudStatement, String, DataCloudResultSet> deferred =
-                (DataCloudStatement s, String x) -> {
-                    impl.apply(s, x);
-
-                    if (wait) {
-                        waitUntilReady(s);
-                    }
-
-                    return (DataCloudResultSet) s.getResultSet();
-                };
-        return arguments(named(String.format("%s; getResultSet -> DataCloudResultSet", name), deferred), size);
     }
 
     @SneakyThrows
-    static boolean waitUntilReady(DataCloudStatement statement) {
-        while (!statement.isReady()) {
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                return false;
-            }
+    @Test
+    public void testSyncPreparedStatement() {
+        withPrepared(sync(), preparedSql, (conn, stmt) -> {
+            val rs = stmt.executeQuery().unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
+        });
+    }
+
+    @SneakyThrows
+    @Test
+    public void testSyncStatement() {
+        withStatement(sync(), (conn, stmt) -> {
+            val rs = stmt.executeQuery(regularSql).unwrap(DataCloudResultSet.class);
+            assertThatResultSetIsCorrect(conn, rs);
+        });
+    }
+
+    @SneakyThrows
+    private void withStatement(Properties properties, ThrowingBiConsumer<DataCloudConnection, DataCloudStatement> func) {
+        try(val conn = getHyperQueryConnection(properties).unwrap(DataCloudConnection.class);
+            val stmt = conn.createStatement().unwrap(DataCloudStatement.class)) {
+            func.accept(conn, stmt);
         }
-        return true;
+    }
+
+    @SneakyThrows
+    private void withPrepared(Properties properties, String sql, ThrowingBiConsumer<DataCloudConnection, DataCloudPreparedStatement> func) {
+        try(val conn = getHyperQueryConnection(properties).unwrap(DataCloudConnection.class);
+            val stmt = conn.prepareStatement(sql).unwrap(DataCloudPreparedStatement.class)) {
+            stmt.setInt(1, large);
+            func.accept(conn, stmt);
+        }
+    }
+
+    @SneakyThrows
+    private void assertThatResultSetIsCorrect(DataCloudConnection conn, DataCloudResultSet rs) {
+        val witnessed = new AtomicInteger(0);
+
+        assertThat(rs).isInstanceOf(StreamingResultSet.class);
+
+        val status = conn.waitForResultsProduced(rs.getQueryId(), Duration.ofSeconds(30));
+
+        log.warn("Status: {}", status);
+
+        assertThat(status).as("Status: " + status).satisfies(s -> {
+            assertThat(s.allResultsProduced()).isTrue();
+            assertThat(s.getRowCount()).isEqualTo(large);
+        });
+
+        assertThat(rs.isReady()).as("result set is ready").isTrue();
+
+        while (rs.next()) {
+            assertEachRowIsTheSame(rs, witnessed);
+            assertThat(rs.getRow()).isEqualTo(witnessed.get());
+        }
+
+        assertThat(witnessed.get()).as("last value seen from query: " + status.getQueryId()).isEqualTo(large);
+    }
+
+    private static Properties sync() {
+        val properties = new Properties();
+        properties.put(Constants.FORCE_SYNC, true);
+        return properties;
+    }
+
+    @FunctionalInterface
+    interface ThrowingBiConsumer<T, U> {
+        void accept(T var1, U var2) throws SQLException;
     }
 }

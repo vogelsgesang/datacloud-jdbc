@@ -15,19 +15,19 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCDateFromDateAndCalendar;
-import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimeFromTimeAndCalendar;
-import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimestampFromTimestampAndCalendar;
-import static com.salesforce.datacloud.jdbc.util.PropertiesExtensions.optional;
-
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import com.salesforce.datacloud.jdbc.core.listener.AsyncQueryStatusListener;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.util.ArrowUtils;
-import com.salesforce.datacloud.jdbc.util.Constants;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
+import lombok.experimental.UtilityClass;
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
+import salesforce.cdp.hyperdb.v1.QueryParam;
+import salesforce.cdp.hyperdb.v1.QueryParameterArrow;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
@@ -50,16 +50,13 @@ import java.sql.SQLXML;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.sql.Types;
-import java.time.Duration;
 import java.util.Calendar;
 import java.util.Map;
 import java.util.TimeZone;
-import lombok.SneakyThrows;
-import lombok.experimental.UtilityClass;
-import lombok.extern.slf4j.Slf4j;
-import lombok.val;
-import salesforce.cdp.hyperdb.v1.QueryParam;
-import salesforce.cdp.hyperdb.v1.QueryParameterArrow;
+
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCDateFromDateAndCalendar;
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimeFromTimeAndCalendar;
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimestampFromTimestampAndCalendar;
 
 @Slf4j
 public class DataCloudPreparedStatement extends DataCloudStatement implements PreparedStatement {
@@ -98,9 +95,7 @@ public class DataCloudPreparedStatement extends DataCloudStatement implements Pr
                 "Per the JDBC specification this method cannot be called on a PreparedStatement, use DataCloudPreparedStatement::execute() instead.");
     }
 
-    @Override
-    @SneakyThrows
-    protected HyperGrpcClientExecutor getQueryExecutor() {
+    private HyperGrpcClientExecutor getQueryExecutor() throws DataCloudJDBCException {
         final byte[] encodedRow;
         try {
             encodedRow = ArrowUtils.toArrowByteArray(parameterManager.getParameters(), calendar);
@@ -115,25 +110,26 @@ public class DataCloudPreparedStatement extends DataCloudStatement implements Pr
                         .build())
                 .build();
 
-        return getQueryExecutor(preparedQueryParams);
+        return dataCloudConnection.getExecutor().toBuilder()
+                .additionalQueryParams(preparedQueryParams)
+                .queryTimeout(getQueryTimeout())
+                .build();
     }
 
     @Override
     public boolean execute() throws SQLException {
         val client = getQueryExecutor();
-        listener = AsyncQueryStatusListener.of(sql, client);
+        listener = AsyncQueryStatusListener.of(sql, client, getQueryTimeoutDuration());
         return true;
     }
 
     @Override
     public ResultSet executeQuery() throws SQLException {
         val client = getQueryExecutor();
-        val timeout = Duration.ofSeconds(getQueryTimeout());
 
-        val useSync = optional(this.dataCloudConnection.getProperties(), Constants.FORCE_SYNC)
-                .map(Boolean::parseBoolean)
-                .orElse(false);
-        resultSet = useSync ? executeSyncQuery(sql, client) : executeAdaptiveQuery(sql, client, timeout);
+        resultSet = useSync()
+                ? executeSyncQuery(sql, client)
+                : executeAdaptiveQuery(sql, client, getQueryTimeoutDuration());
         return resultSet;
     }
 
