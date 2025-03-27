@@ -1,0 +1,78 @@
+name: Reusable Build and Publish
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        required: true
+        type: boolean
+        description: 'Whether to publish or not'
+      version:
+        required: false
+        type: string
+        description: 'Version to publish (tag name or snapshot)'
+        default: ''
+    secrets:
+      signing_pass:
+        required: false
+      signing_key:
+        required: false
+      publish_user:
+        required: false
+      publish_pass:
+        required: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java with 8 and 17 toolchains
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: |
+            8
+            17
+      - name: Get hyperd version
+        run: |
+          HYPER_VERSION=$(sed -n 's/^hyperApiVersion=\(.*\)/\1/p' gradle.properties)
+          echo "HYPER_VERSION=$HYPER_VERSION" >> $GITHUB_ENV
+      - name: Cache hyperd zip
+        uses: actions/cache@v3
+        with:
+          path: build/hyper-${{ env.HYPER_VERSION }}.zip
+          key: ${{ runner.os }}-hyper-${{ env.HYPER_VERSION }}
+          restore-keys: ${{ runner.os }}-hyper-${{ env.HYPER_VERSION }}
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          dependency-graph: generate-and-submit
+          build-scan-publish: true
+          build-scan-terms-of-use-url: "https://gradle.com/terms-of-service"
+          build-scan-terms-of-use-agree: "yes"
+          gradle-version: "8.12"
+      - name: Gradle build
+        id: build
+        run: gradle clean build
+      - name: Publish on release
+        id: publish
+        if: ${{ inputs.publish && (success() || steps.build.outcome == 'success') }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          OSSRH_USERNAME: ${{ secrets.publish_user }}
+          OSSRH_PASSWORD: ${{ secrets.publish_pass }}
+          # https://docs.gradle.org/current/userguide/signing_plugin.html#sec:in-memory-keys
+          # https://central.sonatype.org/publish/requirements/gpg/#generating-a-key-pair
+          # gpg --export-secret-key --armor <key id> | pbcopy
+          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.signing_key }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.signing_pass }}
+        run: gradle publishAllPublicationsToMavenCentralRepository --no-scan --no-configuration-cache
+      - name: Upload hyper logs on failure
+        if: ${{ failure() || steps.build.outcome == 'failure' || steps.publish.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            build/hyperd/*.log
+          retention-days: 5

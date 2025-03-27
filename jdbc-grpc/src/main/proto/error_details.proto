@@ -13,21 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.salesforce.datacloud.jdbc;
+syntax = "proto3";
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatExceptionOfType;
+package salesforce.hyperdb.grpc.v1;
 
-import com.salesforce.datacloud.jdbc.config.DriverVersion;
-import java.sql.Driver;
-import java.sql.DriverManager;
-import java.sql.SQLException;
-import java.util.Properties;
-import java.util.regex.Pattern;
-import lombok.val;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
+option java_multiple_files = true;
+option java_package = "salesforce.cdp.hyperdb.v1";
 
-class DataCloudJDBCDriverTest {
+message TextPosition {
+  uint64 error_begin_character_offset = 2;
+  uint64 error_end_character_offset = 3;
+}
 
+message ErrorInfo {
+  string primary_message = 1;
+  string sqlstate = 2;
+  string customer_hint = 3;
+  string customer_detail = 4;
+  string system_detail = 5;
+  TextPosition position = 6;
+  string error_source = 7;
 }

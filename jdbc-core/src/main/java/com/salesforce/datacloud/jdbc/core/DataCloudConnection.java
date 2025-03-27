@@ -36,6 +36,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
 
 import java.sql.Array;
 import java.sql.Blob;
@@ -149,6 +150,8 @@ public class DataCloudConnection implements Connection, AutoCloseable {
                 .connectionString(connectionString)
                 .build();
     }
+
+
 
     @Override
     public Statement createStatement() {

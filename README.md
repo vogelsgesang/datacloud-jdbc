@@ -27,7 +27,13 @@ com.salesforce.datacloud.jdbc.DataCloudJDBCDriver
 Use the following command to build and test the driver:
 
 ```shell
-mvn clean install
+./gradlew clean build
+```
+
+To inspect the jars that will be published run and take a look in `build/maven-repo`:
+
+```shell
+./gradlew build publishAllPublicationsToRootBuildDirRepository
 ```
 
 ## Usage
