@@ -54,7 +54,16 @@ jobs:
           gradle-version: "8.12"
       - name: Gradle build
         id: build
-        run: gradle clean build
+        run: |
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            echo "Version specified, running clean build with no cache for ${{ inputs.version }}"
+            gradle clean build --no-build-cache --rerun-tasks
+          else
+            echo "No version specified, running normal build"
+            gradle clean build
+          fi
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
       - name: Publish on release
         id: publish
         if: ${{ inputs.publish && (success() || steps.build.outcome == 'success') }}
