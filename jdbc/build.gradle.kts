@@ -6,12 +6,19 @@ plugins {
 }
 
 dependencies {
+    api(platform(libs.grpc.bom))
+
     implementation(project(":jdbc-core"))
+    implementation(project(":jdbc-util"))
+    implementation(project(":jdbc-http"))
     implementation(project(":jdbc-grpc"))
+
+    implementation(libs.bundles.grpc.impl)
     implementation(libs.slf4j.api)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.bundles.testing)
+    testImplementation(libs.bundles.mocking)
 }
 
 tasks.shadowJar {

@@ -15,10 +15,11 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import com.salesforce.datacloud.jdbc.auth.TokenProcessor;
+import com.google.common.collect.ImmutableList;
 import com.salesforce.datacloud.jdbc.config.KeywordResources;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.util.Constants;
+import com.salesforce.datacloud.jdbc.util.ThrowingJdbcSupplier;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -27,17 +28,23 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import lombok.AllArgsConstructor;
-import lombok.SneakyThrows;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.OkHttpClient;
 
 @Slf4j
 @AllArgsConstructor
 public class DataCloudDatabaseMetadata implements DatabaseMetaData {
-    private final DataCloudStatement dataCloudStatement;
-    private final Optional<TokenProcessor> tokenProcessor;
-    private final OkHttpClient client;
-    private final Optional<DataCloudConnectionString> connectionString;
+
+    @Getter
+    private final Connection connection;
+
+    private final DataCloudConnectionString connectionString;
+
+    private final ThrowingJdbcSupplier<String> lakehouseSupplier;
+
+    private final ThrowingJdbcSupplier<List<String>> dataspacesSupplier;
+
+    @Getter
     private final String userName;
 
     @Override
@@ -50,15 +57,11 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
         return true;
     }
 
-    @SneakyThrows
     @Override
     public String getURL() {
-        return connectionString.map(DataCloudConnectionString::getDatabaseUrl).orElse(null);
-    }
-
-    @Override
-    public String getUserName() {
-        return userName;
+        return Optional.ofNullable(connectionString)
+                .map(DataCloudConnectionString::getDatabaseUrl)
+                .orElse(null);
     }
 
     @Override
@@ -655,17 +658,17 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
     @Override
     public ResultSet getTables(String catalog, String schemaPattern, String tableNamePattern, String[] types)
             throws SQLException {
-        return QueryMetadataUtil.createTableResultSet(schemaPattern, tableNamePattern, types, dataCloudStatement);
+        return QueryMetadataUtil.createTableResultSet(schemaPattern, tableNamePattern, types, connection);
     }
 
     @Override
     public ResultSet getSchemas() throws SQLException {
-        return QueryMetadataUtil.createSchemaResultSet(null, dataCloudStatement);
+        return QueryMetadataUtil.createSchemaResultSet(null, connection);
     }
 
     @Override
     public ResultSet getCatalogs() throws SQLException {
-        return QueryMetadataUtil.createCatalogsResultSet(tokenProcessor);
+        return QueryMetadataUtil.createCatalogsResultSet(lakehouseSupplier);
     }
 
     @Override
@@ -676,8 +679,7 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
     @Override
     public ResultSet getColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern)
             throws SQLException {
-        return QueryMetadataUtil.createColumnResultSet(
-                schemaPattern, tableNamePattern, columnNamePattern, dataCloudStatement);
+        return QueryMetadataUtil.createColumnResultSet(schemaPattern, tableNamePattern, columnNamePattern, connection);
     }
 
     @Override
@@ -807,11 +809,6 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
     }
 
     @Override
-    public Connection getConnection() {
-        return dataCloudStatement.getConnection();
-    }
-
-    @Override
     public boolean supportsSavepoints() {
         return false;
     }
@@ -899,7 +896,7 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
 
     @Override
     public ResultSet getSchemas(String catalog, String schemaPattern) throws SQLException {
-        return QueryMetadataUtil.createSchemaResultSet(schemaPattern, dataCloudStatement);
+        return QueryMetadataUtil.createSchemaResultSet(schemaPattern, connection);
     }
 
     @Override
@@ -940,7 +937,7 @@ public class DataCloudDatabaseMetadata implements DatabaseMetaData {
     }
 
     public List<String> getDataspaces() throws SQLException {
-        return QueryMetadataUtil.createDataspacesResponse(tokenProcessor, client);
+        return dataspacesSupplier == null ? ImmutableList.of() : dataspacesSupplier.get();
     }
 
     @Override

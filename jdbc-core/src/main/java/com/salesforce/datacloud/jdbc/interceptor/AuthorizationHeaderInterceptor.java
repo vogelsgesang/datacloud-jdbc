@@ -17,7 +17,6 @@ package com.salesforce.datacloud.jdbc.interceptor;
 
 import static com.salesforce.datacloud.jdbc.interceptor.MetadataUtilities.keyOf;
 
-import com.salesforce.datacloud.jdbc.auth.TokenProcessor;
 import io.grpc.Metadata;
 import java.sql.SQLException;
 import lombok.AccessLevel;
@@ -29,7 +28,7 @@ import lombok.val;
 
 @Slf4j
 @ToString
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class AuthorizationHeaderInterceptor implements HeaderMutatingClientInterceptor {
 
     @FunctionalInterface
@@ -39,11 +38,6 @@ public class AuthorizationHeaderInterceptor implements HeaderMutatingClientInter
         default String getAudience() {
             return null;
         }
-    }
-
-    public static AuthorizationHeaderInterceptor of(TokenProcessor tokenProcessor) {
-        val supplier = new TokenProcessorSupplier(tokenProcessor);
-        return new AuthorizationHeaderInterceptor(supplier, "oauth");
     }
 
     public static AuthorizationHeaderInterceptor of(TokenSupplier supplier) {
@@ -70,25 +64,6 @@ public class AuthorizationHeaderInterceptor implements HeaderMutatingClientInter
         val audience = tokenSupplier.getAudience();
         if (audience != null) {
             headers.put(AUD_KEY, audience);
-        }
-    }
-
-    @AllArgsConstructor
-    static class TokenProcessorSupplier implements TokenSupplier {
-        private final TokenProcessor tokenProcessor;
-
-        @SneakyThrows
-        @Override
-        public String getToken() {
-            val token = tokenProcessor.getDataCloudToken();
-            return token.getAccessToken();
-        }
-
-        @SneakyThrows
-        @Override
-        public String getAudience() {
-            val token = tokenProcessor.getDataCloudToken();
-            return token.getTenantId();
         }
     }
 }

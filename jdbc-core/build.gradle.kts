@@ -6,10 +6,12 @@ plugins {
 
 dependencies {
     compileOnly(project(":jdbc-grpc"))
+    compileOnly(libs.grpc.stub)
+    compileOnly(libs.grpc.protobuf)
+
+    implementation(project(":jdbc-util"))
 
     implementation(libs.slf4j.api)
-
-    implementation(libs.bundles.grpc)
 
     implementation(libs.bundles.arrow)
 
@@ -19,38 +21,18 @@ dependencies {
 
     implementation(libs.jackson.databind)
 
-    implementation(libs.okhttp3)
-
     implementation(libs.failsafe)
 
     implementation(libs.apache.commons.lang3)
-
-    implementation(libs.jjwt.api)
-
-    runtimeOnly(libs.jjwt.impl)
-
-    runtimeOnly(libs.jjwt.jackson)
 
     testImplementation(project(":jdbc-grpc"))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.bundles.testing)
     testImplementation(libs.bundles.mocking)
-    testImplementation(libs.bundles.grpc)
-}
-
-tasks.register("generateVersionProperties") {
-    val resourcesDir = layout.buildDirectory.dir("resources/main")
-    val version = project.version
-    outputs.dir(resourcesDir)
-
-    doLast {
-        val propertiesFile = resourcesDir.get().file("driver-version.properties")
-        propertiesFile.asFile.parentFile.mkdirs()
-        propertiesFile.asFile.writeText("version=$version")
-        logger.lifecycle("version written to driver-version.properties. version=$version")
-    }
+    testImplementation(libs.bundles.grpc.impl)
+    testImplementation(libs.bundles.grpc.testing)
 }
 
 tasks.named("compileJava") {
-    dependsOn("generateVersionProperties", ":jdbc-grpc:compileJava")
+    dependsOn(":jdbc-grpc:compileJava")
 }

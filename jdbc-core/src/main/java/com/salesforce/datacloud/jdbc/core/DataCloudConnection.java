@@ -15,21 +15,13 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
-import static com.salesforce.datacloud.jdbc.util.Constants.LOGIN_URL;
-import static com.salesforce.datacloud.jdbc.util.Constants.USER;
-import static com.salesforce.datacloud.jdbc.util.Constants.USER_NAME;
-
-import com.salesforce.datacloud.jdbc.auth.AuthenticationSettings;
-import com.salesforce.datacloud.jdbc.auth.DataCloudTokenProcessor;
-import com.salesforce.datacloud.jdbc.auth.TokenProcessor;
 import com.salesforce.datacloud.jdbc.core.partial.ChunkBased;
 import com.salesforce.datacloud.jdbc.core.partial.RowBased;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
-import com.salesforce.datacloud.jdbc.http.ClientBuilder;
-import com.salesforce.datacloud.jdbc.interceptor.AuthorizationHeaderInterceptor;
 import com.salesforce.datacloud.jdbc.interceptor.DataspaceHeaderInterceptor;
 import com.salesforce.datacloud.jdbc.interceptor.HyperExternalClientContextHeaderInterceptor;
 import com.salesforce.datacloud.jdbc.interceptor.HyperWorkloadHeaderInterceptor;
+import com.salesforce.datacloud.jdbc.util.ThrowingJdbcSupplier;
 import com.salesforce.datacloud.jdbc.util.Unstable;
 import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
 import io.grpc.ClientInterceptor;
@@ -53,7 +45,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -69,21 +60,23 @@ import lombok.val;
 @Slf4j
 @Builder(access = AccessLevel.PACKAGE)
 public class DataCloudConnection implements Connection, AutoCloseable {
-    private static final int DEFAULT_PORT = 443;
+    public static final int DEFAULT_PORT = 443;
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
-    private final TokenProcessor tokenProcessor;
+    private final ThrowingJdbcSupplier<String> lakehouseSupplier;
+
+    private final ThrowingJdbcSupplier<List<String>> dataspacesSupplier;
 
     private final DataCloudConnectionString connectionString;
 
     @Getter(AccessLevel.PACKAGE)
-    @NonNull @Builder.Default
+    @Builder.Default
     private final Properties properties = new Properties();
 
     @Unstable
     @Getter(AccessLevel.PACKAGE)
-    @NonNull private final HyperGrpcClientExecutor executor;
+    private final HyperGrpcClientExecutor executor;
 
     /**
      * This creates a Data Cloud connection with minimal adjustments to the channels.
@@ -101,6 +94,26 @@ public class DataCloudConnection implements Connection, AutoCloseable {
                 .build();
     }
 
+    public static DataCloudConnection fromOauth(
+            @NonNull ManagedChannelBuilder<?> builder,
+            Properties properties,
+            ClientInterceptor authInterceptor,
+            ThrowingJdbcSupplier<String> lakehouseSupplier,
+            ThrowingJdbcSupplier<List<String>> dataspacesSupplier)
+            throws SQLException {
+
+        val interceptors = getPropertyDerivedClientInterceptors(properties);
+        interceptors.add(0, authInterceptor);
+        val executor = HyperGrpcClientExecutor.of(builder.intercept(interceptors), properties);
+
+        return DataCloudConnection.builder()
+                .executor(executor)
+                .properties(properties)
+                .lakehouseSupplier(lakehouseSupplier)
+                .dataspacesSupplier(dataspacesSupplier)
+                .build();
+    }
+
     /**
      * Initializes a list of interceptors that handle channel level concerns that can be defined through properties
      * @param properties - The connection properties
@@ -113,40 +126,6 @@ public class DataCloudConnection implements Connection, AutoCloseable {
                         DataspaceHeaderInterceptor.of(properties))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-    }
-
-    private static DataCloudTokenProcessor getDataCloudTokenProcessor(Properties properties)
-            throws DataCloudJDBCException {
-        if (!AuthenticationSettings.hasAny(properties)) {
-            throw new DataCloudJDBCException("No authentication settings provided");
-        }
-
-        return DataCloudTokenProcessor.of(properties);
-    }
-
-    public static DataCloudConnection of(String url, Properties properties) throws SQLException {
-        val connectionString = DataCloudConnectionString.of(url);
-        addClientUsernameIfRequired(properties);
-        connectionString.withParameters(properties);
-        properties.setProperty(LOGIN_URL, connectionString.getLoginUrl());
-
-        val tokenProcessor = getDataCloudTokenProcessor(properties);
-        val authInterceptor = AuthorizationHeaderInterceptor.of(tokenProcessor);
-
-        val host = tokenProcessor.getDataCloudToken().getTenantUrl();
-        val builder = ManagedChannelBuilder.forAddress(host, DEFAULT_PORT);
-
-        val interceptors = getPropertyDerivedClientInterceptors(properties);
-        interceptors.add(0, authInterceptor);
-
-        val executor = HyperGrpcClientExecutor.of(builder.intercept(interceptors), properties);
-
-        return DataCloudConnection.builder()
-                .tokenProcessor(tokenProcessor)
-                .executor(executor)
-                .properties(properties)
-                .connectionString(connectionString)
-                .build();
     }
 
     @Override
@@ -200,7 +179,7 @@ public class DataCloudConnection implements Connection, AutoCloseable {
      * @param offset The starting row offset.
      * @param limit The quantity of rows relative to the offset to wait for
      * @param timeout The duration to wait for the engine have results produced.
-     * @param allowLessThan Whether or not to return early when the available rows is less than {@code offset + limit}
+     * @param allowLessThan Whether to return early when the available rows is less than {@code offset + limit}
      * @return The final {@link DataCloudQueryStatus} the server replied with.
      */
     public DataCloudQueryStatus waitForRowsAvailable(
@@ -273,18 +252,8 @@ public class DataCloudConnection implements Connection, AutoCloseable {
 
     @Override
     public DatabaseMetaData getMetaData() {
-        val client = ClientBuilder.buildOkHttpClient(properties);
         val userName = this.properties.getProperty("userName");
-        return new DataCloudDatabaseMetadata(
-                getQueryStatement(),
-                Optional.ofNullable(tokenProcessor),
-                client,
-                Optional.ofNullable(connectionString),
-                userName);
-    }
-
-    private @NonNull DataCloudStatement getQueryStatement() {
-        return new DataCloudStatement(this);
+        return new DataCloudDatabaseMetadata(this, connectionString, lakehouseSupplier, dataspacesSupplier, userName);
     }
 
     @Override
@@ -321,7 +290,7 @@ public class DataCloudConnection implements Connection, AutoCloseable {
 
     @Override
     public Statement createStatement(int resultSetType, int resultSetConcurrency) {
-        return getQueryStatement();
+        return new DataCloudStatement(this);
     }
 
     @Override
@@ -482,11 +451,5 @@ public class DataCloudConnection implements Connection, AutoCloseable {
     @Override
     public boolean isWrapperFor(Class<?> iface) {
         return iface.isInstance(this);
-    }
-
-    static void addClientUsernameIfRequired(Properties properties) {
-        if (properties.containsKey(USER)) {
-            properties.computeIfAbsent(USER_NAME, p -> properties.get(USER));
-        }
     }
 }

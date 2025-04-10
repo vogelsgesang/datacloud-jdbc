@@ -8,6 +8,8 @@ dependencies {
   devPublication(project(":jdbc"))
   devPublication(project(":jdbc-core"))
   devPublication(project(":jdbc-grpc"))
+  devPublication(project(":jdbc-http"))
+  devPublication(project(":jdbc-util"))
 }
 
 tasks.named("check") {
@@ -21,7 +23,7 @@ tasks.named("check") {
   val repo = devPublish.devMavenRepo.file("com/salesforce/datacloud/").get().asFile
 
   doLast {
-    val expectedPublications = setOf("jdbc", "jdbc-grpc", "jdbc-proto", "jdbc-core")
+    val expectedPublications = setOf("jdbc", "jdbc-grpc", "jdbc-proto", "jdbc-core", "jdbc-util", "jdbc-http")
     val shaded = setOf("jdbc")
 
     val resolvedVersion = expectedVersion.get()
