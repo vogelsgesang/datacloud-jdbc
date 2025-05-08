@@ -17,6 +17,9 @@ package com.salesforce.datacloud.jdbc.core;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import java.sql.Connection;
@@ -88,10 +91,30 @@ class DataCloudConnectionTest extends HyperGrpcTestBase {
         connection.close();
     }
 
+    @SneakyThrows
+    @Test
+    void testChannelClosesWhenShouldCloseChannelWithConnectionIsTrue() {
+        val mockChannel = mock(DataCloudJdbcManagedChannel.class);
+        val connection = DataCloudConnection.of(mockChannel, new Properties(), true);
+
+        connection.close();
+
+        verify(mockChannel).close();
+    }
+
+    @SneakyThrows
+    @Test
+    void testChannelNotClosedWhenShouldCloseChannelWithConnectionIsFalse() {
+        val mockChannel = mock(DataCloudJdbcManagedChannel.class);
+        val connection = DataCloudConnection.of(mockChannel, new Properties(), false);
+
+        connection.close();
+
+        verify(mockChannel, never()).close();
+    }
+
+    @SneakyThrows
     private DataCloudConnection sut() {
-        return DataCloudConnection.builder()
-                .executor(hyperGrpcClient)
-                .properties(new Properties())
-                .build();
+        return DataCloudConnection.of(channel, new Properties(), true);
     }
 }

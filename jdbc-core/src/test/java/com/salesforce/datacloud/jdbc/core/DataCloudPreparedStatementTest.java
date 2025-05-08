@@ -18,7 +18,6 @@ package com.salesforce.datacloud.jdbc.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Named.named;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -28,7 +27,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.google.common.collect.ImmutableList;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.util.Constants;
 import com.salesforce.datacloud.jdbc.util.DateTimeUtils;
@@ -43,7 +41,6 @@ import java.sql.Clob;
 import java.sql.Date;
 import java.sql.NClob;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -63,11 +60,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
-import salesforce.cdp.hyperdb.v1.QueryParam;
 
 public class DataCloudPreparedStatementTest extends HyperGrpcTestBase {
 
@@ -82,12 +77,12 @@ public class DataCloudPreparedStatementTest extends HyperGrpcTestBase {
     private final Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT+2"));
 
     @BeforeEach
-    public void beforeEach() {
+    public void beforeEach() throws DataCloudJDBCException {
 
         mockConnection = mock(DataCloudConnection.class);
         val properties = new Properties();
-        when(mockConnection.getExecutor()).thenReturn(hyperGrpcClient);
-        when(mockConnection.getProperties()).thenReturn(properties);
+        when(mockConnection.getChannel()).thenReturn(channel);
+        when(mockConnection.getClientInfo()).thenReturn(properties);
 
         mockParameterManager = mock(ParameterManager.class);
 
@@ -110,27 +105,6 @@ public class DataCloudPreparedStatementTest extends HyperGrpcTestBase {
                 .isInstanceOf(DataCloudJDBCException.class)
                 .hasMessage(
                         "Per the JDBC specification this method cannot be called on a PreparedStatement, use DataCloudPreparedStatement::execute() instead.");
-    }
-
-    @SneakyThrows
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testForceSyncOverride(boolean forceSync) {
-        val p = new Properties();
-        p.setProperty(Constants.FORCE_SYNC, Boolean.toString(forceSync));
-        when(mockConnection.getProperties()).thenReturn(p);
-
-        val statement = new DataCloudPreparedStatement(mockConnection, "SELECT * FROM table", mockParameterManager);
-
-        setupHyperGrpcClientWithMockedResultSet(
-                "query id",
-                ImmutableList.of(),
-                forceSync ? QueryParam.TransferMode.SYNC : QueryParam.TransferMode.ADAPTIVE);
-        ResultSet response = statement.executeQuery();
-        AssertionsForClassTypes.assertThat(statement.isReady()).isTrue();
-        assertNotNull(response);
-        AssertionsForClassTypes.assertThat(response.getMetaData().getColumnCount())
-                .isEqualTo(3);
     }
 
     @Test
@@ -352,7 +326,7 @@ public class DataCloudPreparedStatementTest extends HyperGrpcTestBase {
         assertEquals(30, preparedStatement.getQueryTimeout());
 
         preparedStatement.setQueryTimeout(-1);
-        assertThat(preparedStatement.getQueryTimeout()).isEqualTo(DataCloudStatement.DEFAULT_QUERY_TIMEOUT);
+        assertThat(preparedStatement.getQueryTimeout()).isEqualTo(Constants.DEFAULT_QUERY_TIMEOUT);
     }
 
     @Test

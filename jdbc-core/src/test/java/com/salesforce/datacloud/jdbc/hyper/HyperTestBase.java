@@ -21,8 +21,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.google.common.collect.ImmutableMap;
 import com.salesforce.datacloud.jdbc.core.DataCloudConnection;
 import com.salesforce.datacloud.jdbc.core.DataCloudStatement;
-import com.salesforce.datacloud.jdbc.interceptor.AuthorizationHeaderInterceptor;
 import com.salesforce.datacloud.jdbc.util.DirectDataCloudConnection;
+import io.grpc.ClientInterceptor;
+import io.grpc.ManagedChannelBuilder;
 import java.sql.ResultSet;
 import java.util.Map;
 import java.util.Properties;
@@ -73,6 +74,16 @@ public class HyperTestBase implements BeforeAllCallback, ExtensionContext.Store.
         }
     }
 
+    @SneakyThrows
+    public static DataCloudConnection getHyperQueryConnection(ClientInterceptor... interceptors) {
+        ManagedChannelBuilder<?> channel = ManagedChannelBuilder.forAddress(
+                        "127.0.0.1", HyperTestBase.getInstancePort())
+                .usePlaintext()
+                .intercept(interceptors);
+
+        return DataCloudConnection.of(channel, new Properties(), true);
+    }
+
     public static DataCloudConnection getHyperQueryConnection() {
         return getHyperQueryConnection(ImmutableMap.of());
     }
@@ -113,13 +124,6 @@ public class HyperTestBase implements BeforeAllCallback, ExtensionContext.Store.
         val instance = getInstance();
         if (instance != null) {
             instance.close();
-        }
-    }
-
-    public static class NoopTokenSupplier implements AuthorizationHeaderInterceptor.TokenSupplier {
-        @Override
-        public String getToken() {
-            return "";
         }
     }
 }

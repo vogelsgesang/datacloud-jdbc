@@ -20,7 +20,6 @@ import static com.salesforce.datacloud.jdbc.hyper.HyperTestBase.getHyperQueryCon
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.salesforce.datacloud.jdbc.hyper.HyperTestBase;
-import com.salesforce.datacloud.jdbc.util.Constants;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Properties;
@@ -86,24 +85,6 @@ public class StreamingResultSetTest {
     }
 
     @SneakyThrows
-    @Test
-    public void testSyncPreparedStatement() {
-        withPrepared(sync(), preparedSql, (conn, stmt) -> {
-            val rs = stmt.executeQuery().unwrap(DataCloudResultSet.class);
-            assertThatResultSetIsCorrect(conn, rs);
-        });
-    }
-
-    @SneakyThrows
-    @Test
-    public void testSyncStatement() {
-        withStatement(sync(), (conn, stmt) -> {
-            val rs = stmt.executeQuery(regularSql).unwrap(DataCloudResultSet.class);
-            assertThatResultSetIsCorrect(conn, rs);
-        });
-    }
-
-    @SneakyThrows
     private void withStatement(
             Properties properties, ThrowingBiConsumer<DataCloudConnection, DataCloudStatement> func) {
         try (val conn = getHyperQueryConnection(properties).unwrap(DataCloudConnection.class);
@@ -149,12 +130,6 @@ public class StreamingResultSetTest {
         assertThat(witnessed.get())
                 .as("last value seen from query: " + status.getQueryId())
                 .isEqualTo(large);
-    }
-
-    private static Properties sync() {
-        val properties = new Properties();
-        properties.put(Constants.FORCE_SYNC, true);
-        return properties;
     }
 
     @FunctionalInterface
