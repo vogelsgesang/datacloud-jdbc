@@ -22,7 +22,6 @@ import com.salesforce.datacloud.jdbc.core.partial.ChunkBased;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
 import com.salesforce.datacloud.jdbc.exception.QueryExceptionHandler;
 import com.salesforce.datacloud.jdbc.util.StreamUtilities;
-import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
 import io.grpc.StatusRuntimeException;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -41,9 +40,6 @@ public class AsyncQueryStatusListener implements QueryStatusListener {
     @Getter
     private final String queryId;
 
-    @Getter
-    private final String query;
-
     private final HyperGrpcClientExecutor client;
 
     private final Duration timeout;
@@ -58,22 +54,12 @@ public class AsyncQueryStatusListener implements QueryStatusListener {
 
             return AsyncQueryStatusListener.builder()
                     .queryId(queryId)
-                    .query(query)
                     .client(client)
                     .timeout(timeout)
                     .build();
         } catch (StatusRuntimeException ex) {
             throw QueryExceptionHandler.createQueryException(query, ex);
         }
-    }
-
-    @Override
-    public String getStatus() throws DataCloudJDBCException {
-        return client.getQueryStatus(queryId)
-                .map(DataCloudQueryStatus::getCompletionStatus)
-                .map(Enum::name)
-                .findFirst()
-                .orElse("UNKNOWN");
     }
 
     @Override
