@@ -20,8 +20,23 @@ import lombok.Getter;
 
 @Getter
 public class DataCloudJDBCException extends SQLException {
+    /**
+     * The primary error message. E.g., "No such table: 'my_tab'".
+     * Should be displayed front and center to the user.
+     */
+    private String primaryMessage;
+
+    /**
+     * A hint for the customer to help them fix the error. E.g., "Did you mean 'my_table'?"
+     * Should be displayed in a secondary position to the user, but only if they can
+     * actually modify the queries. If queries are automatically generated, the user will
+     * have no way to fix the error, so displaying the hint is not helpful.
+     */
     private String customerHint;
 
+    /**
+     * Additional details about the error.
+     */
     private String customerDetail;
 
     public DataCloudJDBCException() {
@@ -57,9 +72,10 @@ public class DataCloudJDBCException extends SQLException {
     }
 
     public DataCloudJDBCException(
-            String reason, String SQLState, String customerHint, String customerDetail, Throwable cause) {
-        super(reason, SQLState, 0, cause);
+            String combinedMessage, String primaryMessage, String SQLState, String customerHint, String customerDetail, Throwable cause) {
+        super(combinedMessage, SQLState, 0, cause);
 
+        this.primaryMessage = primaryMessage;
         this.customerHint = customerHint;
         this.customerDetail = customerDetail;
     }

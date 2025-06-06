@@ -61,10 +61,15 @@ public class QueryExceptionHandler {
                     String sqlState = errorInfo.getSqlstate();
                     String customerHint = errorInfo.getCustomerHint();
                     String customerDetail = errorInfo.getCustomerDetail();
-                    String primaryMessage = String.format(
-                            "%s: %s%nDETAIL:%n%s%nHINT:%n%s",
-                            sqlState, errorInfo.getPrimaryMessage(), customerDetail, customerHint);
-                    return new DataCloudJDBCException(primaryMessage, sqlState, customerHint, customerDetail, ex);
+                    String primaryMessage = errorInfo.getPrimaryMessage();
+                    String combinedMessage = primaryMessage;
+                    if (!customerDetail.isEmpty()) {
+                        combinedMessage += "\nDETAIL: " + customerDetail;
+                    }
+                    if (!customerHint.isEmpty()) {
+                        combinedMessage += "\nHINT: " + customerHint;
+                    }
+                    return new DataCloudJDBCException(combinedMessage, primaryMessage, sqlState, customerHint, customerDetail, ex);
                 }
             }
         }
