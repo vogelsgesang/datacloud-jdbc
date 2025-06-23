@@ -66,8 +66,9 @@ public class HyperServerProcess implements AutoCloseable {
                 .toFile();
 
         if (!executable.exists()) {
-            Assertions.fail("hyperd executable couldn't be found, have you run `gradle extractHyper`? expected="
-                    + executable.getAbsolutePath() + ", os=" + System.getProperty("os.name"));
+            throw new IllegalStateException(
+                "hyperd executable couldn't be found, have you run `gradle extractHyper`? expected="
+                        + executable.getAbsolutePath() + ", os=" + System.getProperty("os.name"));
         }
 
         val builder = new ProcessBuilder()
