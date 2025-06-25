@@ -15,6 +15,7 @@
  */
 package com.salesforce.datacloud.jdbc.core;
 
+import static com.salesforce.datacloud.jdbc.util.ArrowUtils.toArrowByteArray;
 import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCDateFromDateAndCalendar;
 import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimeFromTimeAndCalendar;
 import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.getUTCTimestampFromTimestampAndCalendar;
@@ -24,7 +25,6 @@ import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import com.salesforce.datacloud.jdbc.core.listener.AsyncQueryStatusListener;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
-import com.salesforce.datacloud.jdbc.util.ArrowUtils;
 import com.salesforce.datacloud.jdbc.util.SqlErrorCodes;
 import java.io.IOException;
 import java.io.InputStream;
@@ -51,7 +51,6 @@ import java.sql.Types;
 import java.util.Calendar;
 import java.util.Map;
 import java.util.TimeZone;
-import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import salesforce.cdp.hyperdb.v1.QueryParam;
@@ -98,7 +97,7 @@ public class DataCloudPreparedStatement extends DataCloudStatement implements Pr
     protected HyperGrpcClientExecutor getQueryExecutor() throws DataCloudJDBCException {
         final byte[] encodedRow;
         try {
-            encodedRow = ArrowUtils.toArrowByteArray(parameterManager.getParameters(), calendar);
+            encodedRow = toArrowByteArray(parameterManager.getParameters(), calendar);
         } catch (IOException e) {
             throw new DataCloudJDBCException("Failed to encode parameters on prepared statement", e);
         }
@@ -439,7 +438,6 @@ interface TypeHandler {
     void setParameter(PreparedStatement ps, int parameterIndex, Object value) throws SQLException;
 }
 
-@UtilityClass
 final class TypeHandlers {
     public static final TypeHandler STRING_HANDLER = (ps, idx, value) -> ps.setString(idx, (String) value);
     public static final TypeHandler BIGDECIMAL_HANDLER = (ps, idx, value) -> ps.setBigDecimal(idx, (BigDecimal) value);
@@ -464,4 +462,8 @@ final class TypeHandlers {
             Maps.immutableEntry(Time.class, TIME_HANDLER),
             Maps.immutableEntry(Timestamp.class, TIMESTAMP_HANDLER),
             Maps.immutableEntry(Boolean.class, BOOLEAN_HANDLER));
+
+    private TypeHandlers() {
+        throw new UnsupportedOperationException("This is a utility class and cannot be instantiated");
+    }
 }

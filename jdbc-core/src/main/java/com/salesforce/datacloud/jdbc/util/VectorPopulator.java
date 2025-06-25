@@ -15,6 +15,10 @@
  */
 package com.salesforce.datacloud.jdbc.util;
 
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.adjustForCalendar;
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.localDateTimeToMicrosecondsSinceEpoch;
+import static com.salesforce.datacloud.jdbc.util.DateTimeUtils.millisToMicrosecondsSinceMidnight;
+
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.salesforce.datacloud.jdbc.core.model.ParameterBinding;
@@ -28,7 +32,6 @@ import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
-import lombok.experimental.UtilityClass;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
@@ -46,8 +49,11 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 
 /** Populates vectors in a VectorSchemaRoot with values from a list of parameters. */
-@UtilityClass
 public final class VectorPopulator {
+
+    private VectorPopulator() {
+        throw new UnsupportedOperationException("This is a utility class and cannot be instantiated");
+    }
 
     /**
      * Populates the vectors in the given VectorSchemaRoot.
@@ -298,9 +304,9 @@ class TimeMicroVectorSetter extends BaseVectorSetter<TimeMicroVector, Time> {
     @Override
     protected void setValueInternal(TimeMicroVector vector, Time value) {
         LocalDateTime localDateTime = new Timestamp(value.getTime()).toLocalDateTime();
-        localDateTime = DateTimeUtils.adjustForCalendar(localDateTime, calendar, TimeZone.getTimeZone("UTC"));
+        localDateTime = adjustForCalendar(localDateTime, calendar, TimeZone.getTimeZone("UTC"));
         long midnightMillis = localDateTime.toLocalTime().toNanoOfDay() / 1_000_000;
-        long microsecondsSinceMidnight = DateTimeUtils.millisToMicrosecondsSinceMidnight(midnightMillis);
+        long microsecondsSinceMidnight = millisToMicrosecondsSinceMidnight(midnightMillis);
 
         vector.setSafe(0, microsecondsSinceMidnight);
     }
@@ -323,8 +329,8 @@ class TimeStampMicroTZVectorSetter extends BaseVectorSetter<TimeStampMicroTZVect
     @Override
     protected void setValueInternal(TimeStampMicroTZVector vector, Timestamp value) {
         LocalDateTime localDateTime = value.toLocalDateTime();
-        localDateTime = DateTimeUtils.adjustForCalendar(localDateTime, calendar, TimeZone.getTimeZone("UTC"));
-        long microsecondsSinceEpoch = DateTimeUtils.localDateTimeToMicrosecondsSinceEpoch(localDateTime);
+        localDateTime = adjustForCalendar(localDateTime, calendar, TimeZone.getTimeZone("UTC"));
+        long microsecondsSinceEpoch = localDateTimeToMicrosecondsSinceEpoch(localDateTime);
 
         vector.setSafe(0, microsecondsSinceEpoch);
     }
