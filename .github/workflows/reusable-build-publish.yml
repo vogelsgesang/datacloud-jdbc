@@ -1,5 +1,8 @@
 name: Reusable Build and Publish
 
+env:
+  GRADLE_VERSION: "8.14"
+
 on:
   workflow_call:
     inputs:
@@ -21,24 +24,35 @@ on:
         required: false
       publish_pass:
         required: false
-
-env:
-  GRADLE_VERSION: "8.12"
+      signing_pub:
+        required: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
       hyper_version: ${{ steps.get_version.outputs.hyper_version }}
+      resolved_version: ${{ steps.get_version.outputs.resolved_version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Get hyperd version
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Get hyperd version and resolved version
         id: get_version
         run: |
-          HYPER_VERSION=$(sed -n 's/^hyperApiVersion=\(.*\)/\1/p' gradle.properties)
+          HYPER_VERSION=$(gradle -q printHyperApiVersion)
           echo "hyper_version=$HYPER_VERSION" >> $GITHUB_OUTPUT
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
 
   build:
     needs: prepare
@@ -59,12 +73,6 @@ jobs:
           java-version: |
             8
             17
-      - name: Cache hyperd zip
-        uses: actions/cache@v3
-        with:
-          path: .hyper/hyper-${{ needs.prepare.outputs.hyper_version }}.zip
-          key: ${{ runner.os }}-hyper-${{ needs.prepare.outputs.hyper_version }}
-          restore-keys: ${{ runner.os }}-hyper-${{ needs.prepare.outputs.hyper_version }}
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -73,14 +81,22 @@ jobs:
           build-scan-terms-of-use-url: "https://gradle.com/terms-of-service"
           build-scan-terms-of-use-agree: "yes"
           gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Cache hyper artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .hyper/hyper-*.zip
+            .hyperd/
+          key: ${{ runner.os }}-hyper-${{ needs.prepare.outputs.hyper_version }}
+          restore-keys: ${{ runner.os }}-hyper-${{ needs.prepare.outputs.hyper_version }}
       - name: Extract Hyper
         id: extract_hyper
-        run: ./gradlew extractHyper
+        run: gradle extractHyper
       - name: Gradle build (with version)
         id: build-and-test
         run: |
           echo "build and test with version='${{ inputs.version }}'"
-          ./gradlew clean build --no-build-cache --rerun-tasks
+          gradle clean build --no-build-cache --rerun-tasks -x test
         env:
           RELEASE_VERSION: ${{ inputs.version }}
       - name: Look at files in verification
@@ -103,6 +119,8 @@ jobs:
     needs: [ prepare, build ]
     if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -119,11 +137,29 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Double check jars
+        run: gradle :verification:check -x :jdbc:test -x :jdbc-core:test -x :jdbc-http:test -x :jdbc-util:test --no-build-cache --scan
+      - name: Get version for jreleaser
+        id: resolve_version
+        run: |
+          RESOLVED_VERSION=$(gradle -q printVersion)
+          echo "resolved_version=$RESOLVED_VERSION" >> $GITHUB_OUTPUT
       - name: Publish to Maven Central
+        uses: jreleaser/release-action@v2
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          OSSRH_USERNAME: ${{ secrets.publish_user }}
-          OSSRH_PASSWORD: ${{ secrets.publish_pass }}
-          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.signing_key }}
-          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.signing_pass }}
-        run: ./gradlew publishAllPublicationsToMavenCentralRepository -x test --no-scan --no-configuration-cache -Dorg.slf4j.simpleLogger.defaultLogLevel=error
+          JRELEASER_PROJECT_VERSION: ${{ steps.resolve_version.outputs.resolved_version }}
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.publish_user }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.publish_pass }}
+          JRELEASER_GPG_SECRET_KEY: ${{ secrets.signing_key }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.signing_pass }}
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JRELEASER_SKIP_TAG: true
+      - name: Upload JReleaser logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jreleaser-logs
+          path: |
+            out/jreleaser/trace.log
+            out/jreleaser/output.properties
+          retention-days: 5

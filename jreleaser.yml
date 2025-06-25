@@ -1,0 +1,56 @@
+project:
+  name: jdbc
+  description: Salesforce Data Cloud JDBC driver
+  links:
+    homepage: https://www.salesforce.com/data/
+    documentation: https://developer.salesforce.com/docs/data/data-cloud-query-guide/guide/data-cloud-jdbc.html
+  authors:
+    - Data Cloud Query Developer Team
+  license: Apache-2.0
+  inceptionYear: "2025"
+  stereotype: NONE
+  vendor: Salesforce Data Cloud
+  tags:
+    - 'jdbc'
+    - 'driver'
+    - 'salesforce'
+
+  languages:
+    java:
+      groupId: com.salesforce.datacloud
+      version: "8"
+      multiProject: true
+
+signing:
+  active: ALWAYS
+  armored: true
+  verify: false
+
+deploy:
+  maven:
+    github:
+      snapshot-deploy:
+        active: SNAPSHOT
+        url: https://maven.pkg.github.com/forcedotcom/datacloud-jdbc
+        snapshotSupported: true
+        sign: false
+        stagingRepositories:
+          - verification/build/maven-dev
+
+    mavenCentral:
+      release-deploy:
+        active: RELEASE
+        url: https://central.sonatype.com/api/v1/publisher
+        sign: true
+        checksums: true
+        sourceJar: true
+        javadocJar: true
+        verifyPom: true
+        applyMavenCentralRules: true
+        stagingRepositories:
+          - verification/build/maven-dev
+
+release:
+  github:
+    enabled: true
+    skipRelease: true
