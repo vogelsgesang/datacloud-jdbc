@@ -17,18 +17,23 @@ package com.salesforce.datacloud.jdbc.core;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
+import io.grpc.ClientInterceptor;
 import java.sql.Connection;
+import java.time.Duration;
 import java.util.Properties;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.val;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+import salesforce.cdp.hyperdb.v1.HyperServiceGrpc;
 
 @ExtendWith(MockitoExtension.class)
 class DataCloudConnectionTest extends HyperGrpcTestBase {
@@ -95,18 +100,44 @@ class DataCloudConnectionTest extends HyperGrpcTestBase {
     @Test
     void testChannelClosesWhenShouldCloseChannelWithConnectionIsTrue() {
         val mockChannel = mock(DataCloudJdbcManagedChannel.class);
-        val connection = DataCloudConnection.of(mockChannel, new Properties(), true);
+        val connection = DataCloudConnection.of(new JdbcDriverStubProvider(mockChannel, true), new Properties());
 
         connection.close();
 
         verify(mockChannel).close();
     }
 
+    /**
+     * Minimal stub provider for testing purposes.
+     */
+    private static class TestStubProvider implements HyperGrpcStubProvider {
+        @Getter
+        public final HyperServiceGrpc.HyperServiceBlockingStub stub =
+                mock(HyperServiceGrpc.HyperServiceBlockingStub.class);
+
+        @Override
+        public void close() throws Exception {
+            // No-op
+        }
+    }
+
+    @SneakyThrows
+    @Test
+    void testDriverInterceptorsAreAddedWhenStubProviderIsUsed() {
+        val properties = new Properties();
+        val stubProvider = new TestStubProvider();
+        val connection = DataCloudConnection.of(stubProvider, properties);
+        connection.getStub(Duration.ZERO);
+        // Interceptors should have been added to set the default workload header (x-hyperdb-workload)
+        verify(stubProvider.stub).withInterceptors(any(ClientInterceptor[].class));
+        connection.close();
+    }
+
     @SneakyThrows
     @Test
     void testChannelNotClosedWhenShouldCloseChannelWithConnectionIsFalse() {
         val mockChannel = mock(DataCloudJdbcManagedChannel.class);
-        val connection = DataCloudConnection.of(mockChannel, new Properties(), false);
+        val connection = DataCloudConnection.of(new JdbcDriverStubProvider(mockChannel, false), new Properties());
 
         connection.close();
 
@@ -115,6 +146,6 @@ class DataCloudConnectionTest extends HyperGrpcTestBase {
 
     @SneakyThrows
     private DataCloudConnection sut() {
-        return DataCloudConnection.of(channel, new Properties(), true);
+        return DataCloudConnection.of(stubProvider, new Properties());
     }
 }

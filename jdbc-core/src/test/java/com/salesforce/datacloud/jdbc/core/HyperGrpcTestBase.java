@@ -25,7 +25,6 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -53,6 +52,8 @@ import salesforce.cdp.hyperdb.v1.QueryStatus;
 @ExtendWith(InProcessGrpcMockExtension.class)
 public class HyperGrpcTestBase {
     protected DataCloudJdbcManagedChannel channel;
+
+    protected JdbcDriverStubProvider stubProvider;
 
     protected static HyperGrpcClientExecutor hyperGrpcClient;
 
@@ -163,6 +164,7 @@ public class HyperGrpcTestBase {
         }));
     }
 
+    @SneakyThrows
     public HyperGrpcClientExecutor setupClientWith(ClientInterceptor... interceptors) {
         val builder = InProcessChannelBuilder.forName(GrpcMock.getGlobalInProcessName())
                 .usePlaintext()
@@ -173,10 +175,10 @@ public class HyperGrpcTestBase {
         }
 
         channel = DataCloudJdbcManagedChannel.of(builder);
+        stubProvider = new JdbcDriverStubProvider(channel, false);
+        val connection = DataCloudConnection.of(stubProvider, new Properties());
 
-        val stub = channel.getStub(new Properties(), Duration.ZERO);
-
-        return HyperGrpcClientExecutor.of(stub, new Properties());
+        return connection.getExecutor();
     }
 
     @BeforeEach
@@ -185,8 +187,10 @@ public class HyperGrpcTestBase {
     }
 
     @AfterEach
+    @SneakyThrows
     public void cleanup() {
         if (channel != null) {
+            stubProvider.close();
             channel.close();
         }
     }

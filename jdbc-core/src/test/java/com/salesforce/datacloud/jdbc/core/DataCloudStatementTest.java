@@ -22,7 +22,6 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
 import com.google.common.collect.ImmutableList;
 import com.salesforce.datacloud.jdbc.exception.DataCloudJDBCException;
@@ -56,16 +55,12 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     @Mock
     private DataCloudConnection connection;
 
-    private Properties properties;
-
     static DataCloudStatement statement;
 
     @BeforeEach
+    @SneakyThrows
     public void beforeEach() {
-        connection = Mockito.mock(DataCloudConnection.class);
-        properties = new Properties();
-        when(connection.getChannel()).thenReturn(channel);
-        when(connection.getClientInfo()).thenReturn(properties);
+        connection = DataCloudConnection.of(stubProvider, new Properties());
         statement = new DataCloudStatement(connection);
     }
 
@@ -207,7 +202,9 @@ public class DataCloudStatementTest extends HyperGrpcTestBase {
     public void testConstraintsConfiguration() {
         val bytes = ThreadLocalRandom.current().nextInt(HYPER_MIN_ROW_LIMIT_BYTE_SIZE, HYPER_MAX_ROW_LIMIT_BYTE_SIZE);
 
+        val properties = new Properties();
         properties.setProperty(Constants.BYTE_LIMIT, Integer.toString(bytes));
+        val connection = DataCloudConnection.of(new JdbcDriverStubProvider(channel, false), properties);
 
         val stmt = new DataCloudStatement(connection);
 

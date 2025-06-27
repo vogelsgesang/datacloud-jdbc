@@ -25,6 +25,8 @@ import com.salesforce.datacloud.jdbc.util.ThrowingJdbcSupplier;
 import com.salesforce.datacloud.query.v3.DataCloudQueryStatus;
 import io.grpc.ClientInterceptor;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.stub.MetadataUtils;
 import java.sql.Array;
 import java.sql.Blob;
 import java.sql.CallableStatement;
@@ -45,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -55,14 +58,14 @@ import lombok.NonNull;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
+import salesforce.cdp.hyperdb.v1.HyperServiceGrpc.HyperServiceBlockingStub;
 
 @Slf4j
 @Builder(access = AccessLevel.PRIVATE)
 public class DataCloudConnection implements Connection, AutoCloseable {
     public static final int DEFAULT_PORT = 443;
 
-    @Getter(AccessLevel.PACKAGE)
-    private final DataCloudJdbcManagedChannel channel;
+    private final HyperGrpcStubProvider stubProvider;
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -73,66 +76,54 @@ public class DataCloudConnection implements Connection, AutoCloseable {
     private final DataCloudConnectionString connectionString;
 
     @Builder.Default
-    private final boolean shouldCloseChannelWithConnection = true;
-
-    @Builder.Default
     @Getter
     @Setter
     private Properties clientInfo = new Properties();
 
     HyperGrpcClientExecutor getExecutor() {
-        val stub = channel.getStub(clientInfo, Duration.ofSeconds(DEFAULT_QUERY_TIMEOUT));
-        return HyperGrpcClientExecutor.of(stub, clientInfo);
+        return HyperGrpcClientExecutor.of(getStub(Duration.ofSeconds(DEFAULT_QUERY_TIMEOUT)), clientInfo);
     }
 
     /**
-     * This allows you to create a DataCloudConnection with minimal adjustments to your ManagedChannel.
+     * This allows you to create a DataCloudConnection with full control over gRPC stub details.
      * To configure the channel with the bare minimum use {@link DataCloudJdbcManagedChannel#of(ManagedChannelBuilder)}
      * To configure the channel with property controlled settings like retries and keep alive use {@link DataCloudJdbcManagedChannel#of(ManagedChannelBuilder, Properties)}
      *
-     * No matter which {@link DataCloudJdbcManagedChannel} builder you choose,
-     * all stubs will be wired with interceptors that control at least the following headers: "x-hyperdb-external-client-context", "x-hyperdb-workload", and "dataspace";
-     * the values these headers specify can be controlled by properties with the keys: "external-client-context", "workload", and "dataspace" respectively.
-     * This method will not provide auth / tracing, users of this API are expected to wire their own interceptors before supplying a {@link ManagedChannelBuilder} to {@link DataCloudJdbcManagedChannel}.
-     * @param channel The channel to use for the connection
+     * This method will also not provide auth or tracing.
+     * @param stubProvider The stub provider to use for the connection
      * @param properties The properties to use for the connection
-     * @param closeChannelWithConnection Whether to close the channel when the connection is closed, if false you are responsible for cleaning up your managed channel.
      * @return A DataCloudConnection with the given channel and properties
      */
-    public static DataCloudConnection of(
-            @NonNull DataCloudJdbcManagedChannel channel,
-            @NonNull Properties properties,
-            boolean closeChannelWithConnection)
+    public static DataCloudConnection of(@NonNull HyperGrpcStubProvider stubProvider, @NonNull Properties properties)
             throws DataCloudJDBCException {
         return logTimedValue(
                 () -> DataCloudConnection.builder()
-                        .channel(channel)
-                        .shouldCloseChannelWithConnection(closeChannelWithConnection)
+                        .stubProvider(stubProvider)
                         .clientInfo(properties)
                         .build(),
-                "DataCloudConnection::of with provided channel. closeChannelWithConnection="
-                        + closeChannelWithConnection,
+                "DataCloudConnection::of with provided stub provider",
                 log);
     }
 
     /**
-     * This is a convenience overload for {@link DataCloudConnection#of(DataCloudJdbcManagedChannel, Properties, boolean)}
+     * This is a convenience overload for {@link DataCloudConnection#of(HyperGrpcStubProvider, Properties)}
      * We pass true for closeChannelWithConnection to ensure the channel that is built internally is cleaned up.
      *
      * @param builder The builder to be passed to {@link DataCloudJdbcManagedChannel#of(ManagedChannelBuilder, Properties)}
-     * @param properties The properties to be passed to {@link DataCloudJdbcManagedChannel#of(ManagedChannelBuilder, Properties)}
+     * @param properties The properties for the JDBC connection
      * @return A DataCloudConnection with the given channel and properties
      */
     public static DataCloudConnection of(@NonNull ManagedChannelBuilder<?> builder, @NonNull Properties properties)
             throws DataCloudJDBCException {
-        return of(DataCloudJdbcManagedChannel.of(builder, properties), properties, true);
+        val stubProvider = new JdbcDriverStubProvider(DataCloudJdbcManagedChannel.of(builder, properties), true);
+        return of(stubProvider, properties);
     }
 
     /**
      * This overload is intended to be used from the {@code DataCloudJDBCDriver} and assumes a Data Cloud token is wired to the suppliers
      * We pass true for closeChannelWithConnection to ensure the channel that is built internally is cleaned up.
      *
-     * @param properties The properties to be passed to {@link DataCloudJdbcManagedChannel#of(ManagedChannelBuilder, Properties)}
+     * @param properties The properties for this JDBC connection
      * @param authInterceptor a {@link ClientInterceptor} wired to provide an auth token for network requests
      * @param lakehouseSupplier a supplier that acquires the lakehouse from a Data Cloud token
      * @param dataspacesSupplier a supplier that acquires available dataspaces using a Data Cloud token
@@ -148,7 +139,8 @@ public class DataCloudConnection implements Connection, AutoCloseable {
             throws DataCloudJDBCException {
         return logTimedValue(
                 () -> DataCloudConnection.builder()
-                        .channel(DataCloudJdbcManagedChannel.of(builder.intercept(authInterceptor), properties))
+                        .stubProvider(new JdbcDriverStubProvider(
+                                DataCloudJdbcManagedChannel.of(builder.intercept(authInterceptor), properties), true))
                         .clientInfo(properties)
                         .lakehouseSupplier(lakehouseSupplier)
                         .dataspacesSupplier(dataspacesSupplier)
@@ -156,6 +148,55 @@ public class DataCloudConnection implements Connection, AutoCloseable {
                         .build(),
                 "DataCloudConnection::of with oauth enabled suppliers",
                 log);
+    }
+
+    /**
+     * Initializes a stub with the appropriate interceptors based on the properties and timeout configured in the JDBC Connection.
+     * @param queryTimeout the timeout for a query
+     * @return the initialized stub
+     */
+    HyperServiceBlockingStub getStub(Duration queryTimeout) {
+        HyperServiceBlockingStub stub = stubProvider.getStub();
+
+        // Attach headers derived from properties to the stub
+        val metadata = deriveMetadataFromProperties(clientInfo);
+        stub = stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata));
+
+        // Adjust timeout
+        if (!queryTimeout.isZero() && !queryTimeout.isNegative()) {
+            log.info(
+                    "Built stub with queryTimeout={}, interceptors={}",
+                    queryTimeout,
+                    metadata.keys().size());
+            stub = stub.withDeadlineAfter(queryTimeout.getSeconds(), TimeUnit.SECONDS);
+        } else {
+            log.info(
+                    "Built stub with queryTimeout=none, interceptors={}",
+                    metadata.keys().size());
+        }
+        return stub;
+    }
+
+    static Metadata deriveMetadataFromProperties(Properties properties) {
+        final String EXTERNAL_CLIENT_CONTEXT_PROPERTY = "external-client-context";
+        final String DATASPACE_PROPERTY = "dataspace";
+
+        Metadata metadata = new Metadata();
+        // We always add a workload name, if the property is not set we use the default value
+        metadata.put(
+                Metadata.Key.of("x-hyperdb-workload", Metadata.ASCII_STRING_MARSHALLER),
+                properties.getProperty("workload", "jdbcv3"));
+        if (properties.containsKey(EXTERNAL_CLIENT_CONTEXT_PROPERTY)) {
+            metadata.put(
+                    Metadata.Key.of("x-hyperdb-external-client-context", Metadata.ASCII_STRING_MARSHALLER),
+                    properties.getProperty(EXTERNAL_CLIENT_CONTEXT_PROPERTY));
+        }
+        if (properties.containsKey(DATASPACE_PROPERTY)) {
+            metadata.put(
+                    Metadata.Key.of("dataspace", Metadata.ASCII_STRING_MARSHALLER),
+                    properties.getProperty(DATASPACE_PROPERTY));
+        }
+        return metadata;
     }
 
     @Override
@@ -308,14 +349,9 @@ public class DataCloudConnection implements Connection, AutoCloseable {
 
     @Override
     public void close() {
-        if (!shouldCloseChannelWithConnection) {
-            log.debug("Called DataCloudConnection::close when shouldCloseChannelWithConnection=false");
-            return;
-        }
-
         try {
             if (closed.compareAndSet(false, true)) {
-                channel.close();
+                stubProvider.close();
             }
         } catch (Exception e) {
             throw new RuntimeException(e);

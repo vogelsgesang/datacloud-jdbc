@@ -21,7 +21,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import io.grpc.inprocess.InProcessChannelBuilder;
-import java.time.Duration;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -75,10 +74,10 @@ class HyperConnectionSettingsTest extends HyperGrpcTestBase {
                 .usePlaintext();
 
         val channel = DataCloudJdbcManagedChannel.of(builder);
+        val stubProvider = new JdbcDriverStubProvider(channel, false);
+        val connection = DataCloudConnection.of(stubProvider, properties);
 
-        val stub = channel.getStub(properties, Duration.ZERO);
-
-        val client = HyperGrpcClientExecutor.of(stub, properties);
+        val client = connection.getExecutor();
 
         GrpcMock.stubFor(GrpcMock.serverStreamingMethod(HyperServiceGrpc.getExecuteQueryMethod())
                 .withRequest(t -> {
@@ -91,6 +90,7 @@ class HyperConnectionSettingsTest extends HyperGrpcTestBase {
 
         assertThat(actual.get()).containsOnly(Maps.immutableEntry(key, setting));
 
+        stubProvider.close();
         channel.close();
     }
 }
